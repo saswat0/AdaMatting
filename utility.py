@@ -4,23 +4,24 @@ import logging
 import numpy as np
 
 
-def save_checkpoint(epoch, model, optimizer, cur_iter, max_iter, init_lr, loss, is_best, ckpt_path):
+def save_checkpoint(epoch, model, optimizer, cur_iter, max_iter, init_lr, cur_lr, loss, is_best, ckpt_path):
     state = {'epoch': epoch,
              'model': model,
              'optimizer': optimizer,
              'cur_iter': cur_iter,
              'max_iter': max_iter,
              'best_loss': loss,
-             'init_lr': init_lr}
-    filename = ckpt_path + "ckpt_{:03d}_{:.4f}.tar".format(epoch, loss)
+             'init_lr': init_lr,
+             'cur_lr': cur_lr}
+    filename = ckpt_path + "ckpt.tar"
     torch.save(state, filename)
     # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
     if is_best:
-        filename = ckpt_path + "ckpt_{:03d}_{:.4f}_best.tar".format(epoch, loss)
+        filename = ckpt_path + "ckpt_best.tar"
         torch.save(state, filename)
 
 
-def poly_lr_scheduler(optimizer, init_lr, iter, max_iter=100, power=0.9):
+def poly_lr_scheduler(optimizer, init_lr, last_lr, cur_iter, max_iter=100, power=0.9):
     """Polynomial decay of learning rate
         :param init_lr is base learning rate
         :param iter is a current iteration
@@ -28,10 +29,12 @@ def poly_lr_scheduler(optimizer, init_lr, iter, max_iter=100, power=0.9):
         :param power is a polymomial power
 
     """
-    lr = init_lr * ((1 - iter / max_iter) ** power)
+    if cur_iter >= max_iter:
+        return last_lr
+    
+    lr = init_lr * ((1 - cur_iter / max_iter) ** power)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-
     return lr
 
 

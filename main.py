@@ -35,13 +35,15 @@ def train(model, optimizer, device, args, logger, multi_gpu):
         max_iter = ckpt["max_iter"]
         cur_iter = ckpt["cur_iter"]
         init_lr = ckpt["init_lr"]
+        cur_lr = ckpt["cur_lr"]
         best_loss = ckpt["best_loss"]
     else:
         logger.info("Start training from scratch")
         start_epoch = 0
-        max_iter = 43100 * (1 - args.valid_portion) / args.batch_size * args.epochs
+        max_iter = 43100 * (1 - args.valid_portion / 100) / args.batch_size * args.epochs
         cur_iter = 0
         init_lr = args.lr
+        cur_lr = args.lr
         best_loss = float('inf')
     
     for epoch in range(start_epoch, args.epochs):
@@ -49,7 +51,7 @@ def train(model, optimizer, device, args, logger, multi_gpu):
         torch.set_grad_enabled(True)
         model.train()
         for index, (img, gt) in enumerate(train_loader):
-            cur_lr = poly_lr_scheduler(optimizer=optimizer, init_lr=init_lr, iter=cur_iter, max_iter=max_iter)
+            cur_lr = poly_lr_scheduler(optimizer=optimizer, init_lr=init_lr, last_lr=cur_lr, cur_iter=cur_iter, max_iter=max_iter)
 
             img = img.type(torch.FloatTensor).to(device) # [bs, 4, 320, 320]
             gt_alpha = (gt[:, 0, :, :].unsqueeze(1)).type(torch.FloatTensor).to(device) # [bs, 1, 320, 320]
@@ -129,7 +131,7 @@ def train(model, optimizer, device, args, logger, multi_gpu):
             logger.info("Checkpoint saved")
             if (is_best):
                 logger.info("Best checkpoint saved")
-            save_checkpoint(epoch, model, optimizer, cur_iter, max_iter, init_lr, avg_loss.avg, is_best, args.ckpt_path)
+            save_checkpoint(epoch, model, optimizer, cur_iter, max_iter, init_lr, cur_lr, avg_loss.avg, is_best, args.ckpt_path)
 
     writer.export_scalars_to_json("./all_scalars.json")
     writer.close()

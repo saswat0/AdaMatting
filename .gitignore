@@ -1,5 +1,6 @@
 __pycache__/*
 dataset/__pycache__/*
+net/__pycache__/*
 log.txt
 runs/*
 ckpts/*

@@ -28,7 +28,7 @@ def poly_lr_scheduler(optimizer, init_lr, iter, max_iter=100, power=0.9):
         :param power is a polymomial power
 
     """
-    lr = init_lr * (1 - iter / max_iter) ** power
+    lr = init_lr * ((1 - iter / max_iter) ** power)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 

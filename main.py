@@ -75,9 +75,9 @@ def train(model, optimizer, device, args, logger, multi_gpu):
                 writer.add_scalar("loss/L_a", L_a.item(), cur_iter)
                 sigma_t = torch.exp(sigma_t / 2)
                 sigma_a = torch.exp(sigma_a / 2)
-                writer.add_scalar("sigma/sigma_t", sigma_t.item(), cur_iter)
-                writer.add_scalar("sigma/sigma_a", sigma_a.item(), cur_iter)
-                writer.add_scalar("lr", cur_lr, cur_iter)
+                writer.add_scalar("other/sigma_t", sigma_t.item(), cur_iter)
+                writer.add_scalar("other/sigma_a", sigma_a.item(), cur_iter)
+                writer.add_scalar("other/lr", cur_lr, cur_iter)
             
             cur_iter += 1
         

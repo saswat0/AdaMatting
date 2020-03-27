@@ -90,7 +90,7 @@ def get_args():
     parser.add_argument('--gpu', type=str, default="0", help="choose gpus")
     parser.add_argument('--write_log', action="store_true", default=False, help="whether store log to log.txt")
     parser.add_argument('--raw_data_path', type=str, default="/data/datasets/im/AdaMatting/", help="dir where datasets are stored")
-    parser.add_argument('--ckpt_path', type=str, help="path to the saved checkpoint file")
+    parser.add_argument('--ckpt_path', type=str, default="./ckpt/", help="path to the saved checkpoint file")
     parser.add_argument('--save_ckpt', action="store_true", default=False, help="whether save checkpoint every 10 epochs")
     parser.add_argument('--resume', action="store_true", default=False, help="whether resume training from a ckpt")
     args = parser.parse_args()

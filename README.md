@@ -19,13 +19,19 @@ this project is not finished
 + [VOC2008test.tar](http://host.robots.ox.ac.uk/pascal/VOC/voc2008/index.html)  
 
 ## Usage
-### Composite the data
+Download and move all above compressed data files into a folder.  
+Set `--raw_data_path={path_to_your_folder}` in any `.sh` file you use. 
+### Decompress and composite the data
 ```bash
 $ bash ./prep.sh
 ```
 ### Train
 ```bash
 $ bash ./train.sh
+```
+### Visualize training
+```bash
+$ tensorboard --logdir ./runs
 ```
 ### Test
 TODO

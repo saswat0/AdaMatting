@@ -56,12 +56,13 @@ def train(model, optimizer, device, args, logger, multi_gpu):
             gt_trimap = gt[:, 1, :, :].type(torch.LongTensor).to(device) # [bs, 320, 320]
 
             optimizer.zero_grad()
-            trimap_adaption, t_argmax, alpha_estimation = model(img)
+            trimap_adaption, t_argmax, alpha_estimation, log_sigma_t_sqr, log_sigma_a_sqr = model(img)
             L_overall, L_t, L_a = task_uncertainty_loss(pred_trimap=trimap_adaption, pred_trimap_argmax=t_argmax, 
                                                         pred_alpha=alpha_estimation, gt_trimap=gt_trimap, 
-                                                        gt_alpha=gt_alpha, log_sigma_t_sqr=model.log_sigma_t_sqr, log_sigma_a_sqr=model.log_sigma_a_sqr)
-            # if multi_gpu:
-            #     L_overall, L_t, L_a = L_overall.mean(), L_t.mean(), L_a.mean()
+                                                        gt_alpha=gt_alpha, log_sigma_t_sqr=log_sigma_t_sqr, log_sigma_a_sqr=log_sigma_a_sqr)
+            if multi_gpu:
+                L_overall, L_t, L_a = L_overall.mean(), L_t.mean(), L_a.mean()
+                sigma_t, sigma_a = log_sigma_t_sqr.mean(), log_sigma_a_sqr.mean()
             optimizer.zero_grad()
             L_overall.backward()
             optimizer.step()
@@ -72,10 +73,10 @@ def train(model, optimizer, device, args, logger, multi_gpu):
                 writer.add_scalar("loss/L_overall", L_overall.item(), cur_iter)
                 writer.add_scalar("loss/L_t", L_t.item(), cur_iter)
                 writer.add_scalar("loss/L_a", L_a.item(), cur_iter)
-                sigma_t = torch.exp(model.log_sigma_t_sqr / 2)
-                sigma_a = torch.exp(model.log_sigma_a_sqr / 2)
-                writer.add_scalar("sigma/sigma_t", sigma_t, cur_iter)
-                writer.add_scalar("sigma/sigma_a", sigma_a, cur_iter)
+                sigma_t = torch.exp(sigma_t / 2)
+                sigma_a = torch.exp(sigma_a / 2)
+                writer.add_scalar("sigma/sigma_t", sigma_t.item(), cur_iter)
+                writer.add_scalar("sigma/sigma_a", sigma_a.item(), cur_iter)
                 writer.add_scalar("lr", cur_lr, cur_iter)
             
             cur_iter += 1
@@ -94,18 +95,19 @@ def train(model, optimizer, device, args, logger, multi_gpu):
                 gt_alpha = (gt[:, 0, :, :].unsqueeze(1)).type(torch.FloatTensor).to(device) # [bs, 1, 320, 320]
                 gt_trimap = gt[:, 1, :, :].type(torch.LongTensor).to(device) # [bs, 320, 320]
 
-                trimap_adaption, t_argmax, alpha_estimation = model(img)
+                trimap_adaption, t_argmax, alpha_estimation, log_sigma_t_sqr, log_sigma_a_sqr = model(img)
                 L_overall_valid, L_t_valid, L_a_valid = task_uncertainty_loss(pred_trimap=trimap_adaption, pred_trimap_argmax=t_argmax, 
                                                             pred_alpha=alpha_estimation, gt_trimap=gt_trimap, 
-                                                            gt_alpha=gt_alpha, log_sigma_t_sqr=model.log_sigma_t_sqr, log_sigma_a_sqr=model.log_sigma_a_sqr)
-                # if multi_gpu:
-                #     L_overall, L_t, L_a = L_overall.mean(), L_t.mean(), L_a.mean()
+                                                            gt_alpha=gt_alpha, log_sigma_t_sqr=log_sigma_t_sqr, log_sigma_a_sqr=log_sigma_a_sqr)
+                if multi_gpu:
+                    L_overall_valid, L_t_valid, L_a_valid = L_overall_valid.mean(), L_t_valid.mean(), L_a_valid.mean()
                 avg_loss.update(L_overall_valid.item())
                 avg_l_t.update(L_t_valid.item())
                 avg_l_a.update(L_a_valid.item())
 
                 if index == 0:
-                    trimap_adaption_res = torchvision.utils.make_grid(t_argmax.type(torch.FloatTensor) / 2, normalize=True, scale_each=True)
+                    trimap_adaption_res = (t_argmax.type(torch.FloatTensor) / 2).unsqueeze(dim=1)
+                    trimap_adaption_res = torchvision.utils.make_grid(trimap_adaption_res, normalize=False, scale_each=True)
                     writer.add_image('valid_image/trimap_adaptation', trimap_adaption_res, cur_iter)
                     alpha_estimation_res = torchvision.utils.make_grid(alpha_estimation, normalize=True, scale_each=True)
                     writer.add_image('valid_image/alpha_estimation', alpha_estimation_res, cur_iter)
@@ -170,7 +172,7 @@ def main():
         test()
     elif args.mode == "prep":
         logger.info("Program runs in prep mode")
-        # composite_dataset(args.raw_data_path, logger)
+        composite_dataset(args.raw_data_path, logger)
         gen_train_valid_names(args.valid_portion, logger)
 
 

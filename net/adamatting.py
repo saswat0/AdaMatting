@@ -117,4 +117,4 @@ class AdaMatting(nn.Module):
         propunit_input = torch.cat((raw, torch.unsqueeze(t_argmax, dim=1).float(), a_decoder), dim=1) # 
         alpha_estimation = self.propunit(propunit_input)
 
-        return trimap_adaption, t_argmax, alpha_estimation
+        return trimap_adaption, t_argmax, alpha_estimation, self.log_sigma_t_sqr, self.log_sigma_a_sqr

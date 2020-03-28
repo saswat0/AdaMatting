@@ -35,3 +35,6 @@ $ tensorboard --logdir ./runs
 ```
 ### Test
 TODO
+
+## Results and trained model
+TODO

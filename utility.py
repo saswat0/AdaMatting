@@ -60,20 +60,11 @@ class AverageMeter(object):
 
 
 def compute_mse(pred, alpha, trimap):
-    """
-    compute the MSE error given a prediction, a ground truth and a trimap.
-    pred: the predicted alpha matte
-    target: the ground truth alpha matte
-    trimap: the given trimap
-    """
     num_pixels = float((trimap == 128).sum())
     return ((pred - alpha) ** 2).sum() / num_pixels
 
 
 def compute_sad(pred, alpha):
-    """
-    compute the SAD error given a prediction and a ground truth.
-    """
     diff = np.abs(pred - alpha)
     return np.sum(diff) / 1000
 
@@ -91,7 +82,7 @@ def get_args():
     parser.add_argument('--write_log', action="store_true", default=False, help="whether store log to log.txt")
     parser.add_argument('--raw_data_path', type=str, default="/data/datasets/im/AdaMatting/", help="dir where datasets are stored")
     parser.add_argument('--ckpt_path', type=str, default="./ckpts/", help="path to the saved checkpoint file")
-    parser.add_argument('--save_ckpt', action="store_true", default=False, help="whether save checkpoint every 10 epochs")
+    parser.add_argument('--save_ckpt', action="store_true", default=False, help="whether save checkpoint every epoch")
     parser.add_argument('--resume', action="store_true", default=False, help="whether resume training from a ckpt")
     args = parser.parse_args()
     return args

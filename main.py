@@ -5,7 +5,7 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 from dataset.dataset import AdaMattingDataset
-from dataset.pre_process import composite_dataset, gen_train_valid_names
+from dataset.pre_process import composite_dataset, gen_train_valid_names, gen_test_names
 from net.adamatting import AdaMatting
 from loss import task_uncertainty_loss
 from utility import get_args, get_logger, poly_lr_scheduler, save_checkpoint, AverageMeter, \
@@ -125,7 +125,7 @@ def train(model, optimizer, device, args, logger, multi_gpu):
 
         is_best = avg_loss.avg < best_loss
         best_loss = min(avg_loss.avg, best_loss)
-        if is_best or (args.save_ckpt and epoch % 10 == 0):
+        if is_best or args.save_ckpt:
             if not os.path.exists("ckpts"):
                 os.makedirs("ckpts")
             logger.info("Checkpoint saved")
@@ -133,12 +133,20 @@ def train(model, optimizer, device, args, logger, multi_gpu):
                 logger.info("Best checkpoint saved")
             save_checkpoint(epoch, model, optimizer, cur_iter, max_iter, init_lr, cur_lr, avg_loss.avg, is_best, args.ckpt_path)
 
-    writer.export_scalars_to_json("./all_scalars.json")
     writer.close()
 
 
-def test():
-    pass
+def test(device, args):
+    ckpt = torch.load("./ckpts/ckpt_best.tar")
+    model = ckpt["model"].module
+    model = model.to(device)
+    torch.set_grad_enabled(False)
+    model.eval()
+
+    test_dataset = AdaMattingDataset(args.raw_data_path, 'test')
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, 
+                                               num_workers=16, pin_memory=True)
+
 
 
 def main():
@@ -171,7 +179,7 @@ def main():
         train(model=model, optimizer=optimizer, device=device, args=args, logger=logger, multi_gpu=multi_gpu)
     elif args.mode == "test":
         logger.info("Program runs in test mode")
-        test()
+        test(device=device, args=args)
     elif args.mode == "prep":
         logger.info("Program runs in prep mode")
         composite_dataset(args.raw_data_path, logger)

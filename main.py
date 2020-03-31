@@ -3,13 +3,16 @@ import torch
 import torchvision
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
+import cv2 as cv
+from torchvision import transforms
+import numpy as np
 
 from dataset.dataset import AdaMattingDataset
-from dataset.pre_process import composite_dataset, gen_train_valid_names, gen_test_names
+from dataset.pre_process import composite_dataset, gen_train_valid_names
 from net.adamatting import AdaMatting
 from loss import task_uncertainty_loss
 from utility import get_args, get_logger, poly_lr_scheduler, save_checkpoint, AverageMeter, \
-                    compute_mse, compute_sad
+                    compute_mse, compute_sad, gen_test_names
 
 
 def train(model, optimizer, device, args, logger, multi_gpu):
@@ -17,10 +20,10 @@ def train(model, optimizer, device, args, logger, multi_gpu):
     writer = SummaryWriter()
 
     logger.info("Initializing data loaders")
-    train_dataset = AdaMattingDataset(args.raw_data_path, 'train')
+    train_dataset = AdaMattingDataset(args.raw_data_path, "train")
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, 
                                                num_workers=16, pin_memory=True)
-    valid_dataset = AdaMattingDataset(args.raw_data_path, 'valid')
+    valid_dataset = AdaMattingDataset(args.raw_data_path, "valid")
     valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, 
                                                num_workers=16, pin_memory=True)
 
@@ -136,17 +139,111 @@ def train(model, optimizer, device, args, logger, multi_gpu):
     writer.close()
 
 
-def test(device, args):
+def test(device, args, logger):
+    logger.info("Loading trained model")
     ckpt = torch.load("./ckpts/ckpt_best.tar")
     model = ckpt["model"].module
     model = model.to(device)
     torch.set_grad_enabled(False)
     model.eval()
 
-    test_dataset = AdaMattingDataset(args.raw_data_path, 'test')
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, 
-                                               num_workers=16, pin_memory=True)
+    test_names = gen_test_names()
 
+    with open(os.path.join(args.raw_data_path, "Combined_Dataset/Test_set/test_fg_names.txt")) as f:
+        fg_files = f.read().splitlines()
+    with open(os.path.join(args.raw_data_path, "Combined_Dataset/Test_set/test_bg_names.txt")) as f:
+        bg_files = f.read().splitlines()
+
+    out_path = os.path.join(args.raw_data_path, "pred/")
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
+
+    logger.info("Start testing")
+    avg_sad = AverageMeter()
+    avg_mse = AverageMeter()
+    for index, name in enumerate(test_names):
+        # file names
+        fcount = int(name.split('.')[0].split('_')[0])
+        bcount = int(name.split('.')[0].split('_')[1])
+        img_name = fg_files[fcount]
+        bg_name = bg_files[bcount]
+        merged_name = bg_name.split(".")[0] + "!" + img_name.split(".")[0] + "!" + str(fcount) + "!" + str(index) + ".png"
+        trimap_name = img_name.split(".")[0] + "_" + str(index % 20) + ".png"
+
+        # read files
+        merged = os.path.join(args.raw_data_path, "test/merged/", merged_name)
+        alpha = os.path.join(args.raw_data_path, "test/mask/", img_name)
+        trimap = os.path.join(args.raw_data_path, "Combined_Dataset/Test_set/Adobe-licensed images/trimaps/", trimap_name)
+        merged = cv.imread(merged)
+        trimap = cv.imread(trimap)
+        alpha = cv.imread(alpha, 0)
+        # cv.imwrite("merged.png", merged)
+        # cv.imwrite("trimap.png", trimap)
+        # cv.imwrite("alpha.png", alpha)
+
+        # process merged image
+        merged = transforms.ToPILImage()(merged)
+        out_merged = merged.copy()
+        merged = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])(merged)
+        h, w = merged.shape[1:3]
+        h_crop, w_crop = h, w
+        for i in range(h):
+            if (h - i) % 16 == 0:
+                h_crop = h - i
+                break
+        h_margin = int((h - h_crop) / 2)
+        for i in range(w):
+            if (w - i) % 16 == 0:
+                w_crop = w - i
+                break
+        w_margin = int((w - w_crop) / 2)
+
+        # write cropped gt alpha
+        alpha = alpha[h_margin : h_margin + h_crop, w_margin : w_margin + w_crop]
+        cv.imwrite(out_path + "{:04d}_gt_alpha.png".format(index), alpha)
+
+        # generate and write cropped gt trimap
+        gt_trimap = np.zeros(alpha.shape)
+        gt_trimap.fill(128)
+        gt_trimap[alpha <= 0] = 0
+        gt_trimap[alpha >= 255] = 255
+        cv.imwrite(out_path + "{:04d}_gt_trimap.png".format(index), gt_trimap)
+
+        # concat the 4-d input and crop to feed the network properly
+        x = torch.zeros((1, 4, h, w), dtype=torch.float)
+        x[0, 0:3, :, :] = merged
+        x[0, 3, :, :] = torch.from_numpy(trimap[:, :, 0] / 255.)
+        x = x[:, :, h_margin : h_margin + h_crop, w_margin : w_margin + w_crop]
+
+        # write cropped input images
+        out_merged = transforms.ToTensor()(out_merged)
+        out_merged = out_merged[:, h_margin : h_margin + h_crop, w_margin : w_margin + w_crop]
+        out_merged = transforms.ToPILImage()(out_merged)
+        out_merged.save(out_path + "{:04d}_input_merged.png".format(index))
+        out_trimap = transforms.ToPILImage()(x[0, 3, :, :])
+        out_trimap.save(out_path + "{:04d}_input_trimap.png".format(index))
+
+        # test
+        x = x.type(torch.FloatTensor).to(device)
+        _, pred_trimap, pred_alpha, _, _ = model(x)
+
+        # output predicted images
+        pred_trimap = (pred_trimap.type(torch.FloatTensor) / 2).unsqueeze(dim=1)
+        pred_trimap = transforms.ToPILImage()(pred_trimap[0, :, :, :])
+        pred_trimap.save(out_path + "{:04d}_pred_trimap.png".format(index))
+        out_pred_alpha = transforms.ToPILImage()(pred_alpha[0, :, :, :].cpu())
+        out_pred_alpha.save(out_path + "{:04d}_pred_alpha.png".format(index))
+        
+        sad = compute_sad(pred_alpha, alpha)
+        mse = compute_mse(pred_alpha, alpha, trimap)
+        logger.info("{:04d}/{} | SAD: {:.1f} | MSE: {:.3f}".format(index, len(test_names), sad.item(), mse.item()))
+        avg_sad.update(sad.item())
+        avg_mse.update(mse.item())
+    
+    logger.info("Average SAD: {:.1f} | Average MSE: {:.3f}".format(avg_sad.avg, avg_mse.avg))
 
 
 def main():
@@ -154,13 +251,13 @@ def main():
     logger = get_logger(args.write_log)
     
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-    device_ids_str = args.gpu.split(',')
+    device_ids_str = args.gpu.split(",")
     device_ids = []
     for i in range(len(device_ids_str)):
         device_ids.append(i)
 
     multi_gpu = False
-    if args.mode != "prep":
+    if args.mode == "train":
         logger.info("Loading network")
         model = AdaMatting(in_channel=4)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
@@ -173,13 +270,18 @@ def main():
             model = model.cuda(device=device_ids[0])
         else:
             device = torch.device("cpu")
+    elif args.mode == "test":
+        if args.cuda:
+            device = torch.device("cuda:{}".format(device_ids[0]))
+        else:
+            device = torch.device("cpu")
 
     if args.mode == "train":
         logger.info("Program runs in train mode")
         train(model=model, optimizer=optimizer, device=device, args=args, logger=logger, multi_gpu=multi_gpu)
     elif args.mode == "test":
         logger.info("Program runs in test mode")
-        test(device=device, args=args)
+        test(device=device, args=args, logger=logger)
     elif args.mode == "prep":
         logger.info("Program runs in prep mode")
         composite_dataset(args.raw_data_path, logger)

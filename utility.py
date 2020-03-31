@@ -2,6 +2,21 @@ import torch
 import argparse
 import logging
 import numpy as np
+import cv2 as cv
+
+
+def gen_test_names():
+    num_fgs = 50
+    num_bgs_per_fg = 20
+
+    names = []
+    bcount = 0
+    for fcount in range(num_fgs):
+        for _ in range(num_bgs_per_fg):
+            names.append(str(fcount) + '_' + str(bcount) + '.png')
+            bcount += 1
+
+    return names
 
 
 def save_checkpoint(epoch, model, optimizer, cur_iter, max_iter, init_lr, cur_lr, loss, is_best, ckpt_path):
@@ -59,14 +74,16 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def compute_mse(pred, alpha, trimap):
-    num_pixels = float((trimap == 128).sum())
-    return ((pred - alpha) ** 2).sum() / num_pixels
-
-
 def compute_sad(pred, alpha):
-    diff = np.abs(pred - alpha)
+    pred = pred[0, 0, :, :].cpu().numpy()
+    diff = np.abs(pred - alpha / 255)
     return np.sum(diff) / 1000
+
+
+def compute_mse(pred, alpha, trimap):
+    pred = pred[0, 0, :, :].cpu().numpy()
+    num_pixels = float((trimap == 128).sum())
+    return ((pred - alpha / 255) ** 2).sum() / num_pixels
 
 
 def get_args():

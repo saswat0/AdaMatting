@@ -11,13 +11,30 @@ from dataset.dataset import AdaMattingDataset
 from dataset.pre_process import composite_dataset, gen_train_valid_names
 from net.adamatting import AdaMatting
 from loss import task_uncertainty_loss
-from utility import get_args, get_logger, poly_lr_scheduler, save_checkpoint, AverageMeter, \
+from utility import get_args, get_logger, lr_scheduler, save_checkpoint, AverageMeter, \
                     compute_mse, compute_sad, gen_test_names
 
 
-def train(model, optimizer, device, args, logger, multi_gpu):
+def train(args, logger, device_ids):
     torch.manual_seed(7)
     writer = SummaryWriter()
+
+    logger.info("Loading network")
+    model = AdaMatting(in_channel=4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+    if args.resume != "":
+        ckpt = torch.load(args.resume)
+        model.load_state_dict(ckpt["state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+    if args.cuda:
+        device = torch.device("cuda:{}".format(device_ids[0]))
+        if len(device_ids) > 1:
+            logger.info("Loading with multiple GPUs")
+            model = torch.nn.DataParallel(model, device_ids=device_ids)
+        # model = model.cuda(device=device_ids[0])
+    else:
+        device = torch.device("cpu")
+    model = model.to(device)
 
     logger.info("Initializing data loaders")
     train_dataset = AdaMattingDataset(args.raw_data_path, "train")
@@ -27,35 +44,27 @@ def train(model, optimizer, device, args, logger, multi_gpu):
     valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, 
                                                num_workers=16, pin_memory=True)
 
-    if args.resume:
+    if args.resume != "":
         logger.info("Start training from saved ckpt")
-        ckpt = torch.load(args.ckpt_path)
-        model = ckpt["model"].module
-        model = model.to(device)
-        optimizer = ckpt["optimizer"]
-
         start_epoch = ckpt["epoch"] + 1
-        max_iter = ckpt["max_iter"]
-        cur_iter = ckpt["cur_iter"]
-        init_lr = ckpt["init_lr"]
-        cur_lr = ckpt["cur_lr"]
+        cur_iter = ckpt["cur_iter"] + 1
+        peak_lr = ckpt["peak_lr"]
         best_loss = ckpt["best_loss"]
     else:
         logger.info("Start training from scratch")
         start_epoch = 0
-        max_iter = 43100 * (1 - args.valid_portion / 100) / args.batch_size * args.epochs
         cur_iter = 0
-        init_lr = args.lr
-        cur_lr = args.lr
+        peak_lr = args.lr
         best_loss = float('inf')
-    
+
     for epoch in range(start_epoch, args.epochs):
         # Training
         torch.set_grad_enabled(True)
         model.train()
         for index, (img, gt) in enumerate(train_loader):
-            cur_lr = poly_lr_scheduler(optimizer=optimizer, init_lr=init_lr, last_lr=cur_lr, cur_iter=cur_iter, max_iter=max_iter)
-
+            cur_lr, peak_lr = lr_scheduler(optimizer=optimizer, cur_iter=cur_iter, peak_lr=peak_lr, end_lr=0.00001, 
+                                           decay_iters=args.decay_iters, decay_power=0.9, power=0.9)
+            
             img = img.type(torch.FloatTensor).to(device) # [bs, 4, 320, 320]
             gt_alpha = (gt[:, 0, :, :].unsqueeze(1)).type(torch.FloatTensor).to(device) # [bs, 1, 320, 320]
             gt_trimap = gt[:, 1, :, :].type(torch.LongTensor).to(device) # [bs, 320, 320]
@@ -65,9 +74,10 @@ def train(model, optimizer, device, args, logger, multi_gpu):
             L_overall, L_t, L_a = task_uncertainty_loss(pred_trimap=trimap_adaption, pred_trimap_argmax=t_argmax, 
                                                         pred_alpha=alpha_estimation, gt_trimap=gt_trimap, 
                                                         gt_alpha=gt_alpha, log_sigma_t_sqr=log_sigma_t_sqr, log_sigma_a_sqr=log_sigma_a_sqr)
-            if multi_gpu:
-                L_overall, L_t, L_a = L_overall.mean(), L_t.mean(), L_a.mean()
-                sigma_t, sigma_a = log_sigma_t_sqr.mean(), log_sigma_a_sqr.mean()
+
+            L_overall, L_t, L_a = L_overall.mean(), L_t.mean(), L_a.mean()
+            sigma_t, sigma_a = log_sigma_t_sqr.mean(), log_sigma_a_sqr.mean()
+
             optimizer.zero_grad()
             L_overall.backward()
             optimizer.step()
@@ -104,8 +114,9 @@ def train(model, optimizer, device, args, logger, multi_gpu):
                 L_overall_valid, L_t_valid, L_a_valid = task_uncertainty_loss(pred_trimap=trimap_adaption, pred_trimap_argmax=t_argmax, 
                                                             pred_alpha=alpha_estimation, gt_trimap=gt_trimap, 
                                                             gt_alpha=gt_alpha, log_sigma_t_sqr=log_sigma_t_sqr, log_sigma_a_sqr=log_sigma_a_sqr)
-                if multi_gpu:
-                    L_overall_valid, L_t_valid, L_a_valid = L_overall_valid.mean(), L_t_valid.mean(), L_a_valid.mean()
+
+                L_overall_valid, L_t_valid, L_a_valid = L_overall_valid.mean(), L_t_valid.mean(), L_a_valid.mean()
+
                 avg_loss.update(L_overall_valid.item())
                 avg_l_t.update(L_t_valid.item())
                 avg_l_a.update(L_a_valid.item())
@@ -131,18 +142,25 @@ def train(model, optimizer, device, args, logger, multi_gpu):
         if is_best or args.save_ckpt:
             if not os.path.exists("ckpts"):
                 os.makedirs("ckpts")
-            logger.info("Checkpoint saved")
-            if (is_best):
-                logger.info("Best checkpoint saved")
-            save_checkpoint(epoch, model, optimizer, cur_iter, max_iter, init_lr, cur_lr, avg_loss.avg, is_best, args.ckpt_path)
+            save_checkpoint(ckpt_path=args.ckpt_path, is_best=is_best, logger=logger, model=model, optimizer=optimizer, 
+                            epoch=epoch, cur_iter=cur_iter, peak_lr=peak_lr, best_loss=best_loss)
 
     writer.close()
 
 
-def test(device, args, logger):
-    logger.info("Loading trained model")
+def test(args, logger, device_ids):
+    logger.info("Loading network")
+    model = AdaMatting(in_channel=4)
     ckpt = torch.load("./ckpts/ckpt_best.tar")
-    model = ckpt["model"].module
+    model.load_state_dict(ckpt["state_dict"])
+    if args.cuda:
+        device = torch.device("cuda:{}".format(device_ids[0]))
+        if len(device_ids) > 1:
+            logger.info("Loading with multiple GPUs")
+            model = torch.nn.DataParallel(model, device_ids=device_ids)
+        # model = model.cuda(device=device_ids[0])
+    else:
+        device = torch.device("cpu")
     model = model.to(device)
     torch.set_grad_enabled(False)
     model.eval()
@@ -256,32 +274,30 @@ def main():
     for i in range(len(device_ids_str)):
         device_ids.append(i)
 
-    multi_gpu = False
-    if args.mode == "train":
-        logger.info("Loading network")
-        model = AdaMatting(in_channel=4)
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
-        if args.cuda:
-            device = torch.device("cuda:{}".format(device_ids[0]))
-            if len(device_ids) > 1 and args.mode=="train":
-                logger.info("Loading with multiple GPUs")
-                model = torch.nn.DataParallel(model, device_ids=device_ids)
-                multi_gpu = True
-            model = model.cuda(device=device_ids[0])
-        else:
-            device = torch.device("cpu")
-    elif args.mode == "test":
-        if args.cuda:
-            device = torch.device("cuda:{}".format(device_ids[0]))
-        else:
-            device = torch.device("cpu")
+    # if args.mode == "train":
+    #     logger.info("Loading network")
+    #     model = AdaMatting(in_channel=4)
+    #     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+    #     if args.cuda:
+    #         device = torch.device("cuda:{}".format(device_ids[0]))
+    #         if len(device_ids) > 1 and args.mode=="train":
+    #             logger.info("Loading with multiple GPUs")
+    #             model = torch.nn.DataParallel(model, device_ids=device_ids)
+    #         model = model.cuda(device=device_ids[0])
+    #     else:
+    #         device = torch.device("cpu")
+    # elif args.mode == "test":
+    #     if args.cuda:
+    #         device = torch.device("cuda:{}".format(device_ids[0]))
+    #     else:
+    #         device = torch.device("cpu")
 
     if args.mode == "train":
         logger.info("Program runs in train mode")
-        train(model=model, optimizer=optimizer, device=device, args=args, logger=logger, multi_gpu=multi_gpu)
+        train(args=args, logger=logger, device_ids=device_ids)
     elif args.mode == "test":
         logger.info("Program runs in test mode")
-        test(device=device, args=args, logger=logger)
+        test(args=args, logger=logger, device_ids=device_ids)
     elif args.mode == "prep":
         logger.info("Program runs in prep mode")
         composite_dataset(args.raw_data_path, logger)

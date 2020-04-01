@@ -19,38 +19,34 @@ def gen_test_names():
     return names
 
 
-def save_checkpoint(epoch, model, optimizer, cur_iter, max_iter, init_lr, cur_lr, loss, is_best, ckpt_path):
-    state = {'epoch': epoch,
-             'model': model,
-             'optimizer': optimizer,
-             'cur_iter': cur_iter,
-             'max_iter': max_iter,
-             'best_loss': loss,
-             'init_lr': init_lr,
-             'cur_lr': cur_lr}
-    filename = ckpt_path + "ckpt.tar"
-    torch.save(state, filename)
-    # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
+def save_checkpoint(ckpt_path, is_best, logger, model, optimizer, epoch, cur_iter, peak_lr, best_loss):
+    state = {"state_dict": model.module.state_dict(),
+             'optimizer': optimizer.state_dict(),
+             "epoch": epoch,
+             "cur_iter": cur_iter,
+             "peak_lr": peak_lr,
+             "best_loss": best_loss}
+    ckpt_fn = ckpt_path + "ckpt.pt"
+    torch.save(state, ckpt_fn)
+    logger.info("Checkpoint saved")
     if is_best:
-        filename = ckpt_path + "ckpt_best.tar"
-        torch.save(state, filename)
+        ckpt_fn = ckpt_path + "ckpt_best.pt"
+        torch.save(state, ckpt_fn)
+        logger.info("Best checkpoint saved")
 
 
-def poly_lr_scheduler(optimizer, init_lr, last_lr, cur_iter, max_iter=100, power=0.9):
-    """Polynomial decay of learning rate
-        :param init_lr is base learning rate
-        :param iter is a current iteration
-        :param max_iter is number of maximum iterations
-        :param power is a polymomial power
+def lr_scheduler(optimizer, cur_iter, peak_lr, end_lr, decay_iters, decay_power=0.9, power=0.8):
+    if cur_iter != 0 and cur_iter % decay_iters == 0:
+        peak_lr = peak_lr * decay_power
 
-    """
-    if cur_iter >= max_iter:
-        return last_lr
-    
-    lr = init_lr * ((1 - cur_iter / max_iter) ** power)
+    cycle_iter = cur_iter % decay_iters
+    lr = (peak_lr - end_lr) * ((1 - cycle_iter / decay_iters) ** power) + end_lr
+
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-    return lr
+    
+
+    return lr, peak_lr
 
 
 class AverageMeter(object):
@@ -94,13 +90,14 @@ def get_args():
     parser.add_argument('--batch_size', type=int, default=64, help='training batch size')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train for')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning Rate. Default=0.01')
+    parser.add_argument('--decay_iters', type=int, required=True, help="Number of iterations every lr decay")
     parser.add_argument('--cuda', action='store_true', default=False, help='use cuda?')
     parser.add_argument('--gpu', type=str, default="0", help="choose gpus")
     parser.add_argument('--write_log', action="store_true", default=False, help="whether store log to log.txt")
     parser.add_argument('--raw_data_path', type=str, default="/data/datasets/im/AdaMatting/", help="dir where datasets are stored")
     parser.add_argument('--ckpt_path', type=str, default="./ckpts/", help="path to the saved checkpoint file")
     parser.add_argument('--save_ckpt', action="store_true", default=False, help="whether save checkpoint every epoch")
-    parser.add_argument('--resume', action="store_true", default=False, help="whether resume training from a ckpt")
+    parser.add_argument('--resume', type=str, default="", help="whether resume training from a ckpt")
     args = parser.parse_args()
     return args
 

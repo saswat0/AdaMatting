@@ -11,4 +11,4 @@ python main.py \
     --gpu=4,5 \
     --write_log \
     --save_ckpt #\
-    # --resume=./ckpts/ckpt.tar
+    #--resume=./ckpts/ckpt_best.pt

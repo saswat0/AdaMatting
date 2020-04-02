@@ -105,7 +105,7 @@ def get_args():
 def get_logger(flag):
     logger = logging.getLogger("AdaMatting")
     logger.setLevel(level=logging.INFO)
-    formatter = logging.Formatter("[%(asctime)s] %(lineno)d: %(levelname)s - %(message)s")
+    formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s")
 
     # log file stream
     if (flag):

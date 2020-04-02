@@ -24,9 +24,15 @@ def train(args, logger, device_ids):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     if args.resume != "":
         ckpt = torch.load(args.resume)
+        # for key, _ in ckpt.items():
+        #     print(key)
         model.load_state_dict(ckpt["state_dict"])
         optimizer.load_state_dict(ckpt["optimizer"])
     if args.cuda:
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.cuda()
         device = torch.device("cuda:{}".format(device_ids[0]))
         if len(device_ids) > 1:
             logger.info("Loading with multiple GPUs")
@@ -151,7 +157,7 @@ def train(args, logger, device_ids):
 def test(args, logger, device_ids):
     logger.info("Loading network")
     model = AdaMatting(in_channel=4)
-    ckpt = torch.load("./ckpts/ckpt_best.tar")
+    ckpt = torch.load("./ckpts/ckpt_best.pt")
     model.load_state_dict(ckpt["state_dict"])
     if args.cuda:
         device = torch.device("cuda:{}".format(device_ids[0]))

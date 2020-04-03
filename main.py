@@ -63,6 +63,9 @@ def train(args, logger, device_ids):
         peak_lr = args.lr
         best_loss = float('inf')
 
+    avg_lo = AverageMeter()
+    avg_lt = AverageMeter()
+    avg_la = AverageMeter()
     for epoch in range(start_epoch, args.epochs):
         # Training
         torch.set_grad_enabled(True)
@@ -88,17 +91,25 @@ def train(args, logger, device_ids):
             L_overall.backward()
             optimizer.step()
 
+            avg_lo.update(L_overall.item())
+            avg_lt.update(L_t.item())
+            avg_la.update(L_a.item())
+
             if cur_iter % 10 == 0:
                 logger.info("Epoch: {:03d} | Iter: {:05d}/{} | Loss: {:.4e} | L_t: {:.4e} | L_a: {:.4e}"
-                            .format(epoch, index, len(train_loader), L_overall.item(), L_t.item(), L_a.item()))
-                writer.add_scalar("loss/L_overall", L_overall.item(), cur_iter)
-                writer.add_scalar("loss/L_t", L_t.item(), cur_iter)
-                writer.add_scalar("loss/L_a", L_a.item(), cur_iter)
+                            .format(epoch, index, len(train_loader), avg_lo.avg, avg_lt.avg, avg_la.avg))
+                writer.add_scalar("loss/L_overall", avg_lo.avg, cur_iter)
+                writer.add_scalar("loss/L_t", avg_lt.avg, cur_iter)
+                writer.add_scalar("loss/L_a", avg_la.avg, cur_iter)
                 sigma_t = torch.exp(sigma_t / 2)
                 sigma_a = torch.exp(sigma_a / 2)
                 writer.add_scalar("other/sigma_t", sigma_t.item(), cur_iter)
                 writer.add_scalar("other/sigma_a", sigma_a.item(), cur_iter)
                 writer.add_scalar("other/lr", cur_lr, cur_iter)
+
+                avg_lo.reset()
+                avg_lt.reset()
+                avg_la.reset()
             
             cur_iter += 1
         

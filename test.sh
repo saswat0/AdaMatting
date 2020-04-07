@@ -5,4 +5,4 @@ python main.py \
     --valid_portion=5 \
     --write_log \
     --cuda \
-    --gpu=4
+    --gpu=5

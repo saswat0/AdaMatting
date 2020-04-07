@@ -35,18 +35,26 @@ def save_checkpoint(ckpt_path, is_best, logger, model, optimizer, epoch, cur_ite
         logger.info("Best checkpoint saved")
 
 
-def lr_scheduler(optimizer, cur_iter, peak_lr, end_lr, decay_iters, decay_power=0.9, power=0.8):
-    if cur_iter != 0 and cur_iter % decay_iters == 0:
-        peak_lr = peak_lr * decay_power
+# def lr_scheduler(optimizer, cur_iter, peak_lr, end_lr, decay_iters, decay_power, power):
+#     if cur_iter != 0 and cur_iter % decay_iters == 0:
+#         peak_lr = peak_lr * decay_power
 
-    cycle_iter = cur_iter % decay_iters
-    lr = (peak_lr - end_lr) * ((1 - cycle_iter / decay_iters) ** power) + end_lr
+#     cycle_iter = cur_iter % decay_iters
+#     lr = (peak_lr - end_lr) * ((1 - cycle_iter / decay_iters) ** power) + end_lr
+
+#     for param_group in optimizer.param_groups:
+#         param_group['lr'] = lr
+
+#     return lr, peak_lr
+
+
+def lr_scheduler(optimizer, init_lr, cur_iter, max_iter, max_decay_times, decay_rate):
+    lr = init_lr * decay_rate ** (cur_iter / max_iter * max_decay_times)
 
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     
-
-    return lr, peak_lr
+    return lr
 
 
 class AverageMeter(object):
@@ -90,7 +98,7 @@ def get_args():
     parser.add_argument('--batch_size', type=int, default=64, help='training batch size')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train for')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning Rate. Default=0.01')
-    parser.add_argument('--decay_iters', type=int, required=True, help="Number of iterations every lr decay")
+    parser.add_argument('--decay_iters', type=int, help="Number of iterations every lr decay")
     parser.add_argument('--cuda', action='store_true', default=False, help='use cuda?')
     parser.add_argument('--gpu', type=str, default="0", help="choose gpus")
     parser.add_argument('--write_log', action="store_true", default=False, help="whether store log to log.txt")

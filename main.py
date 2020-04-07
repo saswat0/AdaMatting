@@ -53,7 +53,7 @@ def train(args, logger, device_ids):
     if args.resume != "":
         logger.info("Start training from saved ckpt")
         start_epoch = ckpt["epoch"] + 1
-        cur_iter = ckpt["cur_iter"] + 1
+        cur_iter = ckpt["cur_iter"]
         peak_lr = ckpt["peak_lr"]
         best_loss = ckpt["best_loss"]
     else:
@@ -63,6 +63,8 @@ def train(args, logger, device_ids):
         peak_lr = args.lr
         best_loss = float('inf')
 
+    max_iter = 43100 * (1 - args.valid_portion / 100) / args.batch_size * args.epochs
+
     avg_lo = AverageMeter()
     avg_lt = AverageMeter()
     avg_la = AverageMeter()
@@ -71,8 +73,10 @@ def train(args, logger, device_ids):
         torch.set_grad_enabled(True)
         model.train()
         for index, (img, gt) in enumerate(train_loader):
-            cur_lr, peak_lr = lr_scheduler(optimizer=optimizer, cur_iter=cur_iter, peak_lr=peak_lr, end_lr=0.00001, 
-                                           decay_iters=args.decay_iters, decay_power=0.9, power=0.9)
+            # cur_lr, peak_lr = lr_scheduler(optimizer=optimizer, cur_iter=cur_iter, peak_lr=peak_lr, end_lr=0.000001, 
+            #                                decay_iters=args.decay_iters, decay_power=0.8, power=0.5)
+            cur_lr = lr_scheduler(optimizer=optimizer, init_lr=args.lr, cur_iter=cur_iter, max_iter=max_iter, 
+                                  max_decay_times=45, decay_rate=0.9)
             
             img = img.type(torch.FloatTensor).to(device) # [bs, 4, 320, 320]
             gt_alpha = (gt[:, 0, :, :].unsqueeze(1)).type(torch.FloatTensor).to(device) # [bs, 1, 320, 320]
@@ -84,8 +88,7 @@ def train(args, logger, device_ids):
                                                         pred_alpha=alpha_estimation, gt_trimap=gt_trimap, 
                                                         gt_alpha=gt_alpha, log_sigma_t_sqr=log_sigma_t_sqr, log_sigma_a_sqr=log_sigma_a_sqr)
 
-            L_overall, L_t, L_a = L_overall.mean(), L_t.mean(), L_a.mean()
-            sigma_t, sigma_a = log_sigma_t_sqr.mean(), log_sigma_a_sqr.mean()
+            sigma_t, sigma_a = torch.exp(log_sigma_t_sqr.mean() / 2), torch.exp(log_sigma_a_sqr.mean() / 2)
 
             optimizer.zero_grad()
             L_overall.backward()
@@ -101,8 +104,6 @@ def train(args, logger, device_ids):
                 writer.add_scalar("loss/L_overall", avg_lo.avg, cur_iter)
                 writer.add_scalar("loss/L_t", avg_lt.avg, cur_iter)
                 writer.add_scalar("loss/L_a", avg_la.avg, cur_iter)
-                sigma_t = torch.exp(sigma_t / 2)
-                sigma_a = torch.exp(sigma_a / 2)
                 writer.add_scalar("other/sigma_t", sigma_t.item(), cur_iter)
                 writer.add_scalar("other/sigma_a", sigma_a.item(), cur_iter)
                 writer.add_scalar("other/lr", cur_lr, cur_iter)
@@ -132,7 +133,7 @@ def train(args, logger, device_ids):
                                                             pred_alpha=alpha_estimation, gt_trimap=gt_trimap, 
                                                             gt_alpha=gt_alpha, log_sigma_t_sqr=log_sigma_t_sqr, log_sigma_a_sqr=log_sigma_a_sqr)
 
-                L_overall_valid, L_t_valid, L_a_valid = L_overall_valid.mean(), L_t_valid.mean(), L_a_valid.mean()
+                # L_overall_valid, L_t_valid, L_a_valid = L_overall_valid.mean(), L_t_valid.mean(), L_a_valid.mean()
 
                 avg_loss.update(L_overall_valid.item())
                 avg_l_t.update(L_t_valid.item())
@@ -141,9 +142,9 @@ def train(args, logger, device_ids):
                 if index == 0:
                     trimap_adaption_res = (t_argmax.type(torch.FloatTensor) / 2).unsqueeze(dim=1)
                     trimap_adaption_res = torchvision.utils.make_grid(trimap_adaption_res, normalize=False, scale_each=True)
-                    writer.add_image('valid_image/trimap_adaptation', trimap_adaption_res, cur_iter)
+                    writer.add_image('valid/pred/trimap_adaptation', trimap_adaption_res, cur_iter)
                     alpha_estimation_res = torchvision.utils.make_grid(alpha_estimation, normalize=True, scale_each=True)
-                    writer.add_image('valid_image/alpha_estimation', alpha_estimation_res, cur_iter)
+                    writer.add_image('valid/pred/alpha_estimation', alpha_estimation_res, cur_iter)
                 
                 pbar.update()
 
@@ -197,6 +198,7 @@ def test(args, logger, device_ids):
     avg_sad = AverageMeter()
     avg_mse = AverageMeter()
     for index, name in enumerate(test_names):
+        torch.cuda.empty_cache()
         # file names
         fcount = int(name.split('.')[0].split('_')[0])
         bcount = int(name.split('.')[0].split('_')[1])
@@ -264,6 +266,11 @@ def test(args, logger, device_ids):
         # test
         x = x.type(torch.FloatTensor).to(device)
         _, pred_trimap, pred_alpha, _, _ = model(x)
+        torch.cuda.empty_cache()
+
+        cropped_trimap = x[0, 3, :, :].unsqueeze(dim=0).unsqueeze(dim=0)
+        pred_alpha[cropped_trimap == 0] = 0.0
+        pred_alpha[cropped_trimap == 255] = 1.0
 
         # output predicted images
         pred_trimap = (pred_trimap.type(torch.FloatTensor) / 2).unsqueeze(dim=1)
@@ -274,9 +281,9 @@ def test(args, logger, device_ids):
         
         sad = compute_sad(pred_alpha, alpha)
         mse = compute_mse(pred_alpha, alpha, trimap)
-        logger.info("{:04d}/{} | SAD: {:.1f} | MSE: {:.3f}".format(index, len(test_names), sad.item(), mse.item()))
         avg_sad.update(sad.item())
         avg_mse.update(mse.item())
+        logger.info("{:04d}/{} | SAD: {:.1f} | MSE: {:.3f} | Avg SAD: {:.1f} | Avg MSE: {:.3f}".format(index, len(test_names), sad.item(), mse.item(), avg_sad.avg, avg_mse.avg))
     
     logger.info("Average SAD: {:.1f} | Average MSE: {:.3f}".format(avg_sad.avg, avg_mse.avg))
 

@@ -19,20 +19,25 @@ def gen_test_names():
     return names
 
 
-def save_checkpoint(ckpt_path, is_best, logger, model, optimizer, epoch, cur_iter, peak_lr, best_loss):
+def save_checkpoint(ckpt_path, is_best, is_alpha_best, logger, model, optimizer, epoch, cur_iter, peak_lr, best_loss, best_alpha_loss):
     state = {"state_dict": model.module.state_dict(),
              'optimizer': optimizer.state_dict(),
              "epoch": epoch,
              "cur_iter": cur_iter,
              "peak_lr": peak_lr,
-             "best_loss": best_loss}
-    ckpt_fn = ckpt_path + "ckpt.pt"
+             "best_loss": best_loss,
+             "best_alpha_loss": best_alpha_loss}
+    ckpt_fn = ckpt_path + "ckpt.tar"
     torch.save(state, ckpt_fn)
     logger.info("Checkpoint saved")
-    if is_best:
-        ckpt_fn = ckpt_path + "ckpt_best.pt"
+    # if is_best:
+    #     ckpt_fn = ckpt_path + "ckpt_best.tar"
+    #     torch.save(state, ckpt_fn)
+    #     logger.info("Best checkpoint saved")
+    if is_alpha_best:
+        ckpt_fn = ckpt_path + "ckpt_best_alpha.tar"
         torch.save(state, ckpt_fn)
-        logger.info("Best checkpoint saved")
+        logger.info("Best alpha loss checkpoint saved")
 
 
 # def lr_scheduler(optimizer, cur_iter, peak_lr, end_lr, decay_iters, decay_power, power):
@@ -80,6 +85,7 @@ class AverageMeter(object):
 
 def compute_sad(pred, alpha):
     pred = pred[0, 0, :, :].cpu().numpy()
+    print(pred.shape, alpha.shape)
     diff = np.abs(pred - alpha / 255)
     return np.sum(diff) / 1000
 

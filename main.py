@@ -56,14 +56,17 @@ def train(args, logger, device_ids):
         cur_iter = ckpt["cur_iter"]
         peak_lr = ckpt["peak_lr"]
         best_loss = ckpt["best_loss"]
+        best_alpha_loss = float('inf')
     else:
         logger.info("Start training from scratch")
         start_epoch = 0
         cur_iter = 0
         peak_lr = args.lr
         best_loss = float('inf')
+        best_alpha_loss = float('inf')
 
     max_iter = 43100 * (1 - args.valid_portion / 100) / args.batch_size * args.epochs
+    tensorboard_iter = cur_iter * (args.batch_size / 16)
 
     avg_lo = AverageMeter()
     avg_lt = AverageMeter()
@@ -84,6 +87,7 @@ def train(args, logger, device_ids):
 
             optimizer.zero_grad()
             trimap_adaption, t_argmax, alpha_estimation, log_sigma_t_sqr, log_sigma_a_sqr = model(img)
+
             L_overall, L_t, L_a = task_uncertainty_loss(pred_trimap=trimap_adaption, pred_trimap_argmax=t_argmax, 
                                                         pred_alpha=alpha_estimation, gt_trimap=gt_trimap, 
                                                         gt_alpha=gt_alpha, log_sigma_t_sqr=log_sigma_t_sqr, log_sigma_a_sqr=log_sigma_a_sqr)
@@ -101,18 +105,19 @@ def train(args, logger, device_ids):
             if cur_iter % 10 == 0:
                 logger.info("Epoch: {:03d} | Iter: {:05d}/{} | Loss: {:.4e} | L_t: {:.4e} | L_a: {:.4e}"
                             .format(epoch, index, len(train_loader), avg_lo.avg, avg_lt.avg, avg_la.avg))
-                writer.add_scalar("loss/L_overall", avg_lo.avg, cur_iter)
-                writer.add_scalar("loss/L_t", avg_lt.avg, cur_iter)
-                writer.add_scalar("loss/L_a", avg_la.avg, cur_iter)
-                writer.add_scalar("other/sigma_t", sigma_t.item(), cur_iter)
-                writer.add_scalar("other/sigma_a", sigma_a.item(), cur_iter)
-                writer.add_scalar("other/lr", cur_lr, cur_iter)
+                writer.add_scalar("loss/L_overall", avg_lo.avg, tensorboard_iter)
+                writer.add_scalar("loss/L_t", avg_lt.avg, tensorboard_iter)
+                writer.add_scalar("loss/L_a", avg_la.avg, tensorboard_iter)
+                writer.add_scalar("other/sigma_t", sigma_t.item(), tensorboard_iter)
+                writer.add_scalar("other/sigma_a", sigma_a.item(), tensorboard_iter)
+                writer.add_scalar("other/lr", cur_lr, tensorboard_iter)
 
                 avg_lo.reset()
                 avg_lt.reset()
                 avg_la.reset()
             
             cur_iter += 1
+            tensorboard_iter = cur_iter * (args.batch_size / 16)
         
         # Validation
         logger.info("Validating after the {}th epoch".format(epoch))
@@ -142,26 +147,28 @@ def train(args, logger, device_ids):
                 if index == 0:
                     trimap_adaption_res = (t_argmax.type(torch.FloatTensor) / 2).unsqueeze(dim=1)
                     trimap_adaption_res = torchvision.utils.make_grid(trimap_adaption_res, normalize=False, scale_each=True)
-                    writer.add_image('valid/pred/trimap_adaptation', trimap_adaption_res, cur_iter)
+                    writer.add_image('valid/pred/trimap_adaptation', trimap_adaption_res, tensorboard_iter)
                     alpha_estimation_res = torchvision.utils.make_grid(alpha_estimation, normalize=True, scale_each=True)
-                    writer.add_image('valid/pred/alpha_estimation', alpha_estimation_res, cur_iter)
+                    writer.add_image('valid/pred/alpha_estimation', alpha_estimation_res, tensorboard_iter)
                 
                 pbar.update()
 
         logger.info("Average loss overall: {:.4e}".format(avg_loss.avg))
         logger.info("Average loss of trimap adaptation: {:.4e}".format(avg_l_t.avg))
         logger.info("Average loss of alpha estimation: {:.4e}".format(avg_l_a.avg))
-        writer.add_scalar("valid_loss/L_overall", avg_loss.avg, cur_iter)
-        writer.add_scalar("valid_loss/L_t", avg_l_t.avg, cur_iter)
-        writer.add_scalar("valid_loss/L_a", avg_l_a.avg, cur_iter)
+        writer.add_scalar("valid_loss/L_overall", avg_loss.avg, tensorboard_iter)
+        writer.add_scalar("valid_loss/L_t", avg_l_t.avg, tensorboard_iter)
+        writer.add_scalar("valid_loss/L_a", avg_l_a.avg, tensorboard_iter)
 
         is_best = avg_loss.avg < best_loss
         best_loss = min(avg_loss.avg, best_loss)
-        if is_best or args.save_ckpt:
+        is_alpha_best = avg_l_a.avg < best_alpha_loss
+        best_alpha_loss = min(avg_l_a.avg, best_alpha_loss)
+        if is_best or is_alpha_best or args.save_ckpt:
             if not os.path.exists("ckpts"):
                 os.makedirs("ckpts")
-            save_checkpoint(ckpt_path=args.ckpt_path, is_best=is_best, logger=logger, model=model, optimizer=optimizer, 
-                            epoch=epoch, cur_iter=cur_iter, peak_lr=peak_lr, best_loss=best_loss)
+            save_checkpoint(ckpt_path=args.ckpt_path, is_best=is_best, is_alpha_best=is_alpha_best, logger=logger, model=model, optimizer=optimizer, 
+                            epoch=epoch, cur_iter=cur_iter, peak_lr=peak_lr, best_loss=best_loss, best_alpha_loss=best_alpha_loss)
 
     writer.close()
 
@@ -169,7 +176,7 @@ def train(args, logger, device_ids):
 def test(args, logger, device_ids):
     logger.info("Loading network")
     model = AdaMatting(in_channel=4)
-    ckpt = torch.load("./ckpts/ckpt_best.pt")
+    ckpt = torch.load("./ckpts/ckpt_best_alpha.tar")
     model.load_state_dict(ckpt["state_dict"])
     if args.cuda:
         device = torch.device("cuda:{}".format(device_ids[0]))
@@ -212,8 +219,12 @@ def test(args, logger, device_ids):
         alpha = os.path.join(args.raw_data_path, "test/mask/", img_name)
         trimap = os.path.join(args.raw_data_path, "Combined_Dataset/Test_set/Adobe-licensed images/trimaps/", trimap_name)
         merged = cv.imread(merged)
+        merged = cv.resize(merged, None, fx=0.75, fy=0.75)
+        merged = cv.cvtColor(merged, cv.COLOR_BGR2RGB)
         trimap = cv.imread(trimap)
+        trimap = cv.resize(trimap, None, fx=0.75, fy=0.75)
         alpha = cv.imread(alpha, 0)
+        alpha = cv.resize(alpha, None, fx=0.75, fy=0.75)
         # cv.imwrite("merged.png", merged)
         # cv.imwrite("trimap.png", trimap)
         # cv.imwrite("alpha.png", alpha)
@@ -269,8 +280,8 @@ def test(args, logger, device_ids):
         torch.cuda.empty_cache()
 
         cropped_trimap = x[0, 3, :, :].unsqueeze(dim=0).unsqueeze(dim=0)
-        pred_alpha[cropped_trimap == 0] = 0.0
-        pred_alpha[cropped_trimap == 255] = 1.0
+        pred_alpha[cropped_trimap <= 0] = 0.0
+        pred_alpha[cropped_trimap >= 1] = 1.0
 
         # output predicted images
         pred_trimap = (pred_trimap.type(torch.FloatTensor) / 2).unsqueeze(dim=1)
@@ -324,7 +335,7 @@ def main():
         test(args=args, logger=logger, device_ids=device_ids)
     elif args.mode == "prep":
         logger.info("Program runs in prep mode")
-        composite_dataset(args.raw_data_path, logger)
+        # composite_dataset(args.raw_data_path, logger)
         gen_train_valid_names(args.valid_portion, logger)
 
 

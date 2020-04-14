@@ -1,5 +1,6 @@
 __pycache__/*
 dataset/__pycache__/*
+dataset/*.txt
 net/__pycache__/*
 log.txt
 test.py

@@ -77,9 +77,27 @@ class AdaMattingDataset(Dataset):
         merged = merged.astype(np.uint8)
 
         # Resize randomly if in training mode
-        resize_factor = 0.75 * random.random() + 0.75
+        resize_factor = 0.75 * random.random() + 0.75 if self.mode == "train" else 1.0
         input_img = cv.resize(merged, None, fx=resize_factor, fy=resize_factor)
         gt_alpha = cv.resize(alpha, None, fx=resize_factor, fy=resize_factor)
+
+        # Resize if in validation mode
+        if self.mode == "valid":
+            h, w = input_img.shape[:2]
+            if h > w:
+                input_img = cv.resize(input_img, (int(w * self.crop_size / h), self.crop_size))
+                gt_alpha = cv.resize(gt_alpha, (int(w * self.crop_size / h), self.crop_size))
+                left_border = int((self.crop_size - input_img.shape[1]) / 2)
+                right_border = self.crop_size - input_img.shape[1] - left_border
+                input_img = cv.copyMakeBorder(input_img, 0, 0, left_border, right_border, cv.BORDER_CONSTANT, value=[0, 0, 0])
+                gt_alpha = cv.copyMakeBorder(gt_alpha, 0, 0, left_border, right_border, cv.BORDER_CONSTANT, value=[0, 0, 0])
+            else:
+                input_img = cv.resize(input_img, (self.crop_size, int(h * self.crop_size / w)))
+                gt_alpha = cv.resize(gt_alpha, (self.crop_size, int(h * self.crop_size / w)))
+                top_border = int((self.crop_size - input_img.shape[0]) / 2)
+                bottom_border = self.crop_size - input_img.shape[0] - top_border
+                input_img = cv.copyMakeBorder(input_img, top_border, bottom_border, 0, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
+                gt_alpha = cv.copyMakeBorder(gt_alpha, top_border, bottom_border, 0, 0, cv.BORDER_CONSTANT, value=[0, 0, 0])
 
         # Rotate randomly in training mode
         if self.mode == "train":
@@ -119,12 +137,7 @@ class AdaMattingDataset(Dataset):
         input_trimap[eroded == 255] = 1.0
         input_trimap[dilated == 0] = 0.0
 
-        # cv.imwrite("temp/input_img.png", input_img)
-        # cv.imwrite("temp/input_trimap.png", input_trimap)
-        # cv.imwrite("temp/gt_alpha.png", gt_alpha)
-        # cv.imwrite("temp/gt_trimap.png", gt_trimap)
-
-        # Convert all from BGR to RGB and store as PIL image
+        # Convert all from BGR to RGB and store as PIL images
         rgb_input_img = cv.cvtColor(input_img, cv.COLOR_BGR2RGB)
         pil_input_img = transforms.ToPILImage()(rgb_input_img)
         pil_input_trimap = transforms.ToPILImage()(input_trimap)

@@ -16,7 +16,6 @@ from utility import get_args, get_logger, lr_scheduler, save_checkpoint, Average
 
 
 def train(args, logger, device_ids):
-    torch.manual_seed(7)
     writer = SummaryWriter()
 
     logger.info("Loading network")
@@ -165,7 +164,7 @@ def train(args, logger, device_ids):
                     gt_trimap = (gt_trimap.type(torch.FloatTensor) / 2).unsqueeze(dim=1)
                     gt_trimap = torchvision.utils.make_grid(gt_trimap, normalize=False, scale_each=True)
                     writer.add_image('gt/trimap', gt_trimap, tensorboard_iter)
-                
+                    
                 pbar.update()
 
         logger.info("Average loss overall: {:.4e}".format(avg_loss.avg))

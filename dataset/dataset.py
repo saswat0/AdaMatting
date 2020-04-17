@@ -80,69 +80,57 @@ class AdaMattingDataset(Dataset):
         merged = normalized_alpha * fg + (1 - normalized_alpha) * bg
         merged = merged.astype(np.uint8)
 
-        # Generate gt_trimap and input_trimap
-        gt_trimap = np.zeros(alpha.shape)
-        gt_trimap.fill(128)
-        gt_trimap[alpha == 0] = 0
-        gt_trimap[alpha == 255] = 255
-        k_size = np.random.randint(10, 26)
-        iterations = np.random.randint(1, 21)
-        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (k_size, k_size))
-        eroded = cv.erode(gt_trimap, kernel, iterations)
-        dilated = cv.dilate(gt_trimap, kernel, iterations)
-        input_trimap = np.zeros(gt_trimap.shape)
-        input_trimap.fill(128)
-        input_trimap[eroded == 255] = 255
-        input_trimap[dilated == 0] = 0
-
         # Resize randomly if in training mode
         resize_factor = 0.75 * np.random.random_sample() + 0.75
         input_img = cv.resize(merged, None, fx=resize_factor, fy=resize_factor)
-        input_trimap = cv.resize(input_trimap, None, fx=resize_factor, fy=resize_factor)
         gt_alpha = cv.resize(alpha, None, fx=resize_factor, fy=resize_factor)
-        gt_trimap = cv.resize(gt_trimap, None, fx=resize_factor, fy=resize_factor)
-        gt_fg = cv.resize(fg, None, fx=resize_factor, fy=resize_factor)
-        gt_bg = cv.resize(bg, None, fx=resize_factor, fy=resize_factor)
-
-        # Flip randomly in training mode
-        if np.random.random_sample() > 0.5:
-            input_img = np.fliplr(input_img)
-            input_trimap = np.fliplr(input_trimap)
-            gt_alpha = np.fliplr(gt_alpha)
-            gt_trimap = np.fliplr(gt_trimap)
-            gt_fg = np.fliplr(gt_fg)
-            gt_bg = np.fliplr(gt_bg)
 
         # Rotate randomly in training mode
         angle = np.random.randint(-45, 46)
         input_img = self.rotate_cv_image(input_img, angle)
-        input_trimap = self.rotate_cv_image(input_trimap, angle)
         gt_alpha = self.rotate_cv_image(gt_alpha, angle)
-        gt_trimap = self.rotate_cv_image(gt_trimap, angle)
-        gt_fg = self.rotate_cv_image(gt_fg, angle)
-        gt_bg = self.rotate_cv_image(gt_bg, angle)
+
+        # Generate gt_trimap
+        gt_trimap = np.zeros(gt_alpha.shape, np.float32)
+        gt_trimap.fill(128)
+        gt_trimap[gt_alpha == 0] = 0
+        gt_trimap[gt_alpha == 255] = 255
 
         # Crop randomly if in training mode
         different_size = np.random.randint(self.crop_size, 801)
         crop_size = (different_size, different_size)
         x, y = self.random_crop_pos(gt_trimap, crop_size)
         input_img = self.do_crop(input_img, x, y, crop_size)
-        input_trimap = self.do_crop(input_trimap, x, y, crop_size)
         gt_alpha = self.do_crop(gt_alpha, x, y, crop_size)
         gt_trimap = self.do_crop(gt_trimap, x, y, crop_size)
-        gt_fg = self.do_crop(gt_fg, x, y, crop_size)
-        gt_bg = self.do_crop(gt_bg, x, y, crop_size)
+
+        # Flip randomly in training mode
+        if np.random.random_sample() > 0.5:
+            input_img = np.fliplr(input_img)
+            gt_alpha = np.fliplr(gt_alpha)
+            gt_trimap = np.fliplr(gt_trimap)
+
+        # Generate input_trimap
+        k_size = np.random.randint(10, 26)
+        iterations = np.random.randint(1, 21)
+        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (k_size, k_size))
+        eroded = cv.erode(gt_trimap, kernel, iterations)
+        dilated = cv.dilate(gt_trimap, kernel, iterations)
+        input_trimap = np.zeros(gt_trimap.shape, np.float32)
+        input_trimap.fill(0.5)
+        input_trimap[eroded == 255] = 1.0
+        input_trimap[dilated == 0] = 0.0
+
+        # cv.imwrite("temp/input_img.png", input_img)
+        # cv.imwrite("temp/input_trimap.png", input_trimap)
+        # cv.imwrite("temp/gt_alpha.png", gt_alpha)
+        # cv.imwrite("temp/gt_trimap.png", gt_trimap)
 
         # Convert all from BGR to RGB and store as PIL image
         rgb_input_img = cv.cvtColor(input_img, cv.COLOR_BGR2RGB)
-        rgb_gt_fg = cv.cvtColor(gt_fg, cv.COLOR_BGR2RGB)
-        rgb_gt_bg = cv.cvtColor(gt_bg, cv.COLOR_BGR2RGB)
         pil_input_img = transforms.ToPILImage()(rgb_input_img)
         pil_input_trimap = transforms.ToPILImage()(input_trimap)
         pil_gt_alpha = transforms.ToPILImage()(gt_alpha)
-        pil_gt_trimap = transforms.ToPILImage()(gt_trimap)
-        pil_gt_fg = transforms.ToPILImage()(rgb_gt_fg)
-        pil_gt_bg = transforms.ToPILImage()(rgb_gt_bg)
 
         display_rgb = transforms.ToTensor()(pil_input_img)
 
@@ -150,11 +138,13 @@ class AdaMattingDataset(Dataset):
         inputs[0:3, :, :] = self.transformer(pil_input_img)
         inputs[3, :, :] = transforms.ToTensor()(pil_input_trimap)
 
-        gts = torch.zeros((8, self.crop_size, self.crop_size), dtype=torch.float)
+        gts = torch.zeros((2, self.crop_size, self.crop_size), dtype=torch.float)
         gts[0, :, :] = transforms.ToTensor()(pil_gt_alpha)
-        gts[1, :, :] = transforms.ToTensor()(pil_gt_trimap)
-        gts[2:5, :, :] = transforms.ToTensor()(pil_gt_fg)
-        gts[5:8, :, :] = transforms.ToTensor()(pil_gt_bg)
+        out_gt_trimap = np.zeros(gt_trimap.shape, np.float32)
+        out_gt_trimap.fill(1.0)
+        out_gt_trimap[gt_trimap == 255] = 2.0
+        out_gt_trimap[gt_trimap == 0] = 0.0
+        gts[1, :, :] = torch.from_numpy(out_gt_trimap)
 
         return display_rgb, inputs, gts
 

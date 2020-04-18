@@ -12,7 +12,8 @@ from dataset.pre_process import composite_dataset, gen_train_valid_names
 from net.adamatting import AdaMatting
 from loss import task_uncertainty_loss
 from utility import get_args, get_logger, lr_scheduler, save_checkpoint, AverageMeter, \
-                    compute_mse, compute_sad, gen_test_names
+                    compute_mse, compute_sad, gen_test_names, clip_gradient
+from net.sync_batchnorm import convert_model
 
 
 def train(args, logger, device_ids):
@@ -23,8 +24,6 @@ def train(args, logger, device_ids):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0001)
     if args.resume != "":
         ckpt = torch.load(args.resume)
-        # for key, _ in ckpt.items():
-        #     print(key)
         model.load_state_dict(ckpt["state_dict"])
         optimizer.load_state_dict(ckpt["optimizer"])
     if args.cuda:
@@ -36,7 +35,7 @@ def train(args, logger, device_ids):
         if len(device_ids) > 1:
             logger.info("Loading with multiple GPUs")
             model = torch.nn.DataParallel(model, device_ids=device_ids)
-        # model = model.cuda(device=device_ids[0])
+            model = convert_model(model)
     else:
         device = torch.device("cpu")
     model = model.to(device)
@@ -78,7 +77,7 @@ def train(args, logger, device_ids):
             # cur_lr, peak_lr = lr_scheduler(optimizer=optimizer, cur_iter=cur_iter, peak_lr=peak_lr, end_lr=0.000001, 
             #                                decay_iters=args.decay_iters, decay_power=0.8, power=0.5)
             cur_lr = lr_scheduler(optimizer=optimizer, init_lr=args.lr, cur_iter=cur_iter, max_iter=max_iter, 
-                                  max_decay_times=45, decay_rate=0.9)
+                                  max_decay_times=30, decay_rate=0.9)
             
             # img = img.type(torch.FloatTensor).to(device) # [bs, 4, 320, 320]
             inputs = inputs.to(device)
@@ -96,6 +95,7 @@ def train(args, logger, device_ids):
 
             optimizer.zero_grad()
             L_overall.backward()
+            clip_gradient(optimizer, 5)
             optimizer.step()
 
             avg_lo.update(L_overall.item())
@@ -225,7 +225,6 @@ def test(args, logger, device_ids):
     avg_sad = AverageMeter()
     avg_mse = AverageMeter()
     for index, name in enumerate(test_names):
-        torch.cuda.empty_cache()
         # file names
         fcount = int(name.split('.')[0].split('_')[0])
         bcount = int(name.split('.')[0].split('_')[1])
@@ -239,15 +238,12 @@ def test(args, logger, device_ids):
         alpha = os.path.join(args.raw_data_path, "test/mask/", img_name)
         trimap = os.path.join(args.raw_data_path, "Combined_Dataset/Test_set/Adobe-licensed images/trimaps/", trimap_name)
         merged = cv.imread(merged)
-        merged = cv.resize(merged, None, fx=0.75, fy=0.75)
+        # merged = cv.resize(merged, None, fx=0.75, fy=0.75)
         merged = cv.cvtColor(merged, cv.COLOR_BGR2RGB)
         trimap = cv.imread(trimap)
-        trimap = cv.resize(trimap, None, fx=0.75, fy=0.75)
+        # trimap = cv.resize(trimap, None, fx=0.75, fy=0.75)
         alpha = cv.imread(alpha, 0)
-        alpha = cv.resize(alpha, None, fx=0.75, fy=0.75)
-        # cv.imwrite("merged.png", merged)
-        # cv.imwrite("trimap.png", trimap)
-        # cv.imwrite("alpha.png", alpha)
+        # alpha = cv.resize(alpha, None, fx=0.75, fy=0.75)
 
         # process merged image
         merged = transforms.ToPILImage()(merged)
@@ -297,7 +293,6 @@ def test(args, logger, device_ids):
         # test
         x = x.type(torch.FloatTensor).to(device)
         _, pred_trimap, pred_alpha, _, _ = model(x)
-        torch.cuda.empty_cache()
 
         cropped_trimap = x[0, 3, :, :].unsqueeze(dim=0).unsqueeze(dim=0)
         pred_alpha[cropped_trimap <= 0] = 0.0

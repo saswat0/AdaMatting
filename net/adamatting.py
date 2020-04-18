@@ -131,7 +131,7 @@ class AdaMatting(nn.Module):
         a_decoder_shallow = self.a_decoder_upscale3(a_decoder_middle) + shortcut_shallow # 64
         a_decoder = self.a_decoder_upscale4(a_decoder_shallow) # 1
 
-        propunit_input = torch.cat((raw, torch.unsqueeze(t_argmax, dim=1).float(), a_decoder), dim=1)
+        propunit_input = torch.cat((raw, torch.unsqueeze(t_argmax, dim=1).float() / 2, a_decoder), dim=1)
         # propunit_input = torch.cat((raw, trimap_adaption, a_decoder), dim=1)
         alpha_estimation = self.propunit(propunit_input)
 

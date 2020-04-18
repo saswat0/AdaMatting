@@ -3,6 +3,7 @@ __pycache__/*
 dataset/__pycache__/*
 dataset/*.txt
 net/__pycache__/*
+net/sync_batchnorm/__pycache__/*
 log.txt
 test.py
 test.png

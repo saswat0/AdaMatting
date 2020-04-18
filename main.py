@@ -150,6 +150,12 @@ def train(args, logger, device_ids):
                     input_trimap = torchvision.utils.make_grid(input_trimap, normalize=False, scale_each=True)
                     writer.add_image('input/trimap', input_trimap, tensorboard_iter)
 
+                    output_alpha = alpha_estimation.clone()
+                    output_alpha[t_argmax.unsqueeze(dim=1) == 0] = 0.0
+                    output_alpha[t_argmax.unsqueeze(dim=1) == 2] = 1.0
+                    output_alpha = torchvision.utils.make_grid(output_alpha, normalize=False, scale_each=True)
+                    writer.add_image('output/alpha', output_alpha, tensorboard_iter)
+
                     trimap_adaption_res = (t_argmax.type(torch.FloatTensor) / 2).unsqueeze(dim=1)
                     trimap_adaption_res = torchvision.utils.make_grid(trimap_adaption_res, normalize=False, scale_each=True)
                     writer.add_image('pred/trimap_adaptation', trimap_adaption_res, tensorboard_iter)

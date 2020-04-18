@@ -127,8 +127,8 @@ class AdaMattingDataset(Dataset):
             gt_trimap = np.fliplr(gt_trimap)
 
         # Generate input_trimap
-        k_size = random.randint(10, 25)
-        iterations = random.randint(1, 20)
+        k_size = random.randint(10, 25) if self.mode == "train" else 20
+        iterations = random.randint(1, 20) if self.mode == "train" else 20
         kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (k_size, k_size))
         eroded = cv.erode(gt_trimap, kernel, iterations)
         dilated = cv.dilate(gt_trimap, kernel, iterations)

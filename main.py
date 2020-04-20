@@ -35,7 +35,7 @@ def train(args, logger, device_ids):
         if len(device_ids) > 1:
             logger.info("Loading with multiple GPUs")
             model = torch.nn.DataParallel(model, device_ids=device_ids)
-            model = convert_model(model)
+            # model = convert_model(model)
     else:
         device = torch.device("cpu")
     model = model.to(device)
@@ -43,10 +43,10 @@ def train(args, logger, device_ids):
     logger.info("Initializing data loaders")
     train_dataset = AdaMattingDataset(args.raw_data_path, "train")
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, 
-                                               num_workers=args.batch_size, pin_memory=True)
+                                               num_workers=16, pin_memory=True, drop_last=True)
     valid_dataset = AdaMattingDataset(args.raw_data_path, "valid")
     valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, 
-                                               num_workers=args.batch_size, pin_memory=True)
+                                               num_workers=16, pin_memory=True, drop_last=True)
 
     if args.resume != "":
         logger.info("Start training from saved ckpt")
@@ -351,7 +351,7 @@ def main():
     elif args.mode == "prep":
         logger.info("Program runs in prep mode")
         composite_dataset(args.raw_data_path, logger)
-        gen_train_valid_names(args.valid_portion, args.batch_size, logger)
+        gen_train_valid_names(args.valid_portion, logger)
 
 
 if __name__ == "__main__":

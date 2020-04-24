@@ -34,11 +34,14 @@ def train(args, logger, device_ids):
         device = torch.device("cuda:{}".format(device_ids[0]))
         if len(device_ids) > 1:
             logger.info("Loading with multiple GPUs")
-            model = torch.nn.DataParallel(model, device_ids=device_ids)
             # model = convert_model(model)
+            model = model.to(device)
+            model = torch.nn.DataParallel(model, device_ids=device_ids)
+        else:
+            model = model.to(device)
     else:
         device = torch.device("cpu")
-    model = model.to(device)
+        model = model.to(device)
 
     logger.info("Initializing data loaders")
     train_dataset = AdaMattingDataset(args.raw_data_path, "train")
@@ -294,9 +297,9 @@ def test(args, logger, device_ids):
         x = x.type(torch.FloatTensor).to(device)
         _, pred_trimap, pred_alpha, _, _ = model(x)
 
-        cropped_trimap = x[0, 3, :, :].unsqueeze(dim=0).unsqueeze(dim=0)
-        pred_alpha[cropped_trimap <= 0] = 0.0
-        pred_alpha[cropped_trimap >= 1] = 1.0
+        # cropped_trimap = x[0, 3, :, :].unsqueeze(dim=0).unsqueeze(dim=0)
+        pred_alpha[pred_trimap.unsqueeze(dim=1) == 0] = 0.0
+        pred_alpha[pred_trimap.unsqueeze(dim=1) == 2] = 1.0
 
         # output predicted images
         pred_trimap = (pred_trimap.type(torch.FloatTensor) / 2).unsqueeze(dim=1)

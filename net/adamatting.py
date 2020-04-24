@@ -61,7 +61,7 @@ class AdaMatting(nn.Module):
             nn.PixelShuffle(2)
         )
         self.t_decoder_upscale4 = nn.Sequential(
-            nn.Conv2d(64, 3 * (2 ** 2), kernel_size=1, stride=1, padding=0, bias=True),
+            nn.Conv2d(64, 3 * (2 ** 2), kernel_size=3, stride=1, padding=1, bias=True),
             nn.BatchNorm2d(3 * (2 ** 2)),
             nn.ReLU(inplace=True),
             nn.PixelShuffle(2)
@@ -87,22 +87,33 @@ class AdaMatting(nn.Module):
             nn.PixelShuffle(2)
         )
         self.a_decoder_upscale4 = nn.Sequential(
-            nn.Conv2d(64, 1 * (2 ** 2), kernel_size=1, stride=1, padding=0, bias=True),
+            nn.Conv2d(64, 1 * (2 ** 2), kernel_size=3, stride=1, padding=1, bias=True),
             nn.BatchNorm2d(1 * (2 ** 2)),
             nn.ReLU(inplace=True),
             nn.PixelShuffle(2)
         )
 
         # Propagation unit
-        self.propunit = PropUnit(
-            input_dim=4 + 1 + 1,
-            hidden_dim=[1],
-            kernel_size=(3, 3),
-            num_layers=1,
-            seq_len=3,
-            bias=True)
+        # self.propunit = PropUnit(
+        #     input_dim=4 + 1 + 1,
+        #     hidden_dim=[1],
+        #     kernel_size=(3, 3),
+        #     num_layers=3,
+        #     seq_len=3,
+        #     bias=True)
+        self.prop_unit = nn.Sequential(
+            nn.Conv2d(4 + 1 + 1, 64, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 1, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.BatchNorm2d(1),
+            nn.ReLU(inplace=True),
+        )
 
-        # Task uncertainty loss
+        # Task uncertainty loss parameters
         self.log_sigma_t_sqr = nn.Parameter(torch.log(torch.Tensor([16.0])))
         self.log_sigma_a_sqr = nn.Parameter(torch.log(torch.Tensor([16.0])))
 
@@ -133,6 +144,7 @@ class AdaMatting(nn.Module):
         
         alpha_estimation = torch.cat((raw, torch.unsqueeze(t_argmax, dim=1).float() / 2, a_decoder), dim=1)
         # alpha_estimation = torch.cat((raw, t_decoder, a_decoder), dim=1)
-        alpha_estimation = self.propunit(alpha_estimation)
+        # alpha_estimation = self.propunit(alpha_estimation)
+        alpha_estimation = self.prop_unit(alpha_estimation)
 
         return t_decoder, t_argmax, alpha_estimation, self.log_sigma_t_sqr, self.log_sigma_a_sqr

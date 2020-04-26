@@ -1,5 +1,5 @@
 {
-    "python.pythonPath": "/home/zhouruifeng/.conda/envs/pytorch/bin/python",
+    "python.pythonPath": "/usr/bin/python3.5",
     "python.linting.pylintArgs": [
         "--extension-pkg-whitelist=torch",
         "--extension-pkg-whitelist=cv2",

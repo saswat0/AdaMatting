@@ -80,7 +80,7 @@ def train(args, logger, device_ids):
             # cur_lr, peak_lr = lr_scheduler(optimizer=optimizer, cur_iter=cur_iter, peak_lr=peak_lr, end_lr=0.000001, 
             #                                decay_iters=args.decay_iters, decay_power=0.8, power=0.5)
             cur_lr = lr_scheduler(optimizer=optimizer, init_lr=args.lr, cur_iter=cur_iter, max_iter=max_iter, 
-                                  max_decay_times=30, decay_rate=0.9)
+                                  max_decay_times=40, decay_rate=0.9)
             
             # img = img.type(torch.FloatTensor).to(device) # [bs, 4, 320, 320]
             inputs = inputs.to(device)
@@ -166,7 +166,6 @@ def train(args, logger, device_ids):
                     alpha_estimation_res = torchvision.utils.make_grid(alpha_estimation, normalize=False, scale_each=True)
                     writer.add_image('pred/alpha_estimation', alpha_estimation_res, tensorboard_iter)
 
-                    gt_alpha = gt_alpha
                     gt_alpha = torchvision.utils.make_grid(gt_alpha, normalize=False, scale_each=True)
                     writer.add_image('gt/alpha', gt_alpha, tensorboard_iter)
 

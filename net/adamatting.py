@@ -10,7 +10,7 @@ sys.path.append(os.path.join(cur_dir, "net"))
 from resblock import Bottleneck, make_resblock
 from gcn import GCN
 from propunit import PropUnit
-
+from BR import BR
 
 class AdaMatting(nn.Module):
 
@@ -40,14 +40,37 @@ class AdaMatting(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 nn.init.constant_(m.bias, 0)
         
-        # Shortcuts
+        #Boundary Refinement
+        self.br1 = BR(64)
+        self.br2 = BR(64 * Bottleneck.expansion)
+        self.br3 = BR(128 * Bottleneck.expansion)
+
+        #  RES boundary Shortcuts
+        shortcut_inplanes = 64
+        self.shortcut_shallow_intial, shortcut_inplanes = make_resblock(shortcut_inplanes, 256, blocks=1, stride=2, block=Bottleneck)
+        self.shortcut_shallow = self.br1(self.shortcut_shallow_intial)
+        self.shortcut_middle_initial, shortcut_inplanes = make_resblock(shortcut_inplanes, 256, blocks=1, stride=2, block=Bottleneck)
+        self.shortcut_shallow = self.br2(self.shortcut_middle_initial)
+        self.shortcut_deep_initial, shortcut_inplanes = make_resblock(shortcut_inplanes, 256, blocks=1, stride=2, block=Bottleneck)
+        self.shortcut_deep = self.br3(self.shortcut_deep_initial)
+
+        # Boundary GCN Shortcuts
+        # self.shortcut_shallow_intial = GCN(64, 64)
+        # self.shortcut_shallow = self.br1(self.shortcut_shallow_intial)
+        # self.shortcut_middle_initial = GCN(64 * Bottleneck.expansion, 64 * Bottleneck.expansion)
+        # self.shortcut_middle = self.br2(self.shortcut_middle_initial)
+        # self.shortcut_deep_initial = GCN(128 * Bottleneck.expansion, 128 * Bottleneck.expansion)
+        # self.shortcut_deep = self.br3(self.shortcut_deep_initial)
+
+        # Original shortcuts
         # self.shortcut_shallow = GCN(64, 64)
         # self.shortcut_middle = GCN(64 * Bottleneck.expansion, 64 * Bottleneck.expansion)
         # self.shortcut_deep = GCN(128 * Bottleneck.expansion, 128 * Bottleneck.expansion)
-        self.shortcut_shallow = self.shortcut_block(64, 64)
-        self.shortcut_middle_a = self.shortcut_block(64 * Bottleneck.expansion, 64 * Bottleneck.expansion)
-        self.shortcut_middle_t = self.shortcut_block(64 * Bottleneck.expansion, 64 * Bottleneck.expansion)
-        self.shortcut_deep = self.shortcut_block(128 * Bottleneck.expansion, 128 * Bottleneck.expansion)
+        # Separate two middle shortcuts
+        # self.shortcut_shallow = self.shortcut_block(64, 64)
+        # self.shortcut_middle_a = self.shortcut_block(64 * Bottleneck.expansion, 64 * Bottleneck.expansion)
+        # self.shortcut_middle_t = self.shortcut_block(64 * Bottleneck.expansion, 64 * Bottleneck.expansion)
+        # self.shortcut_deep = self.shortcut_block(128 * Bottleneck.expansion, 128 * Bottleneck.expansion)
 
         # T-decoder
         self.t_decoder_upscale1 = nn.Sequential(

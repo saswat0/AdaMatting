@@ -112,7 +112,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='set arguments')
     parser.add_argument('--mode', type=str, required=True, choices=["train", "test", "prep"], help="set the program to \'train\', \'test\', or \'prep\'")
     parser.add_argument('--valid_portion', type=int, required=True, help="percentage of valid data in all training samples")
-    parser.add_argument('--batch_size', type=int, default=64, help='training batch size')
+    parser.add_argument('--batch_size', type=int, default=16, help='training batch size')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train for')
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning Rate. Default=0.0001')
     parser.add_argument('--decay_iters', type=int, help="Number of iterations every lr decay")
